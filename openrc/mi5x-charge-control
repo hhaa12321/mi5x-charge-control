@@ -104,8 +104,8 @@ current_behaviour()
 		die "cannot read charge behaviour"
 
 	case "$raw" in
-	\[auto\]*) printf '%s\n' auto ;;
-	\[inhibit-charge\]*) printf '%s\n' inhibit-charge ;;
+	*'[auto]'*) printf '%s\n' auto ;;
+	*'[inhibit-charge]'*) printf '%s\n' inhibit-charge ;;
 	auto) printf '%s\n' auto ;;
 	inhibit-charge) printf '%s\n' inhibit-charge ;;
 	*) die "cannot parse charge behaviour: $raw" ;;

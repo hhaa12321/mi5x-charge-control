@@ -90,7 +90,7 @@ test_upper_threshold_stops_charging()
 test_lower_threshold_resumes_charging()
 {
 	new_case
-	printf '[inhibit-charge] auto\n' >"$CHARGER/charge_behaviour"
+	printf 'auto [inhibit-charge]\n' >"$CHARGER/charge_behaviour"
 	printf '55\n' >"$BATTERY/capacity"
 	run_once
 	assert_eq auto "$(cat "$CHARGER/charge_behaviour")" \
@@ -105,9 +105,9 @@ test_midrange_preserves_state()
 	assert_eq '[auto] inhibit-charge' "$(cat "$CHARGER/charge_behaviour")" \
 		'midrange auto state is preserved'
 
-	printf '[inhibit-charge] auto\n' >"$CHARGER/charge_behaviour"
+	printf 'auto [inhibit-charge]\n' >"$CHARGER/charge_behaviour"
 	run_once
-	assert_eq '[inhibit-charge] auto' "$(cat "$CHARGER/charge_behaviour")" \
+	assert_eq 'auto [inhibit-charge]' "$(cat "$CHARGER/charge_behaviour")" \
 		'midrange inhibit state is preserved'
 }
 
@@ -115,9 +115,9 @@ test_idempotent_transition()
 {
 	new_case
 	printf '90\n' >"$BATTERY/capacity"
-	printf '[inhibit-charge] auto\n' >"$CHARGER/charge_behaviour"
+	printf 'auto [inhibit-charge]\n' >"$CHARGER/charge_behaviour"
 	run_once
-	assert_eq '[inhibit-charge] auto' "$(cat "$CHARGER/charge_behaviour")" \
+	assert_eq 'auto [inhibit-charge]' "$(cat "$CHARGER/charge_behaviour")" \
 		'already-inhibited state is not rewritten'
 }
 

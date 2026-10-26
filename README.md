@@ -11,8 +11,10 @@
 - `openrc/`：读取电池电量，在上限停止充电，在回差下限恢复充电。
 
 > [!WARNING]
-> 刷写自定义内核有设备无法启动的风险。发布者只在源码和对象编译层面验证了
-> 本项目，**尚未刷入真机验证**。刷写前必须保留可恢复启动链和原内核。
+> 刷写自定义内核有设备无法启动的风险。本项目已在 Xiaomi Mi 5X / Mi A1
+> (`tissot`) 的 postmarketOS v26.06、`7.0.9-msm8953` 内核上完成真机验证，
+> 但其他内核版本和设备仍需自行验证。刷写前必须保留可恢复启动链和原内核。
+> 实测记录见 [真机验证](docs/hardware-validation-2026-10-26.md)。
 
 ## 为什么需要内核补丁
 
@@ -53,10 +55,16 @@
 cat /sys/class/power_supply/qcom-smbchg-usb/charge_behaviour
 ```
 
-预期输出类似：
+预期输出类似（方括号表示当前选中的行为）：
 
 ```text
 [auto] inhibit-charge
+```
+
+服务在电量高于上限后会把当前值切换为：
+
+```text
+auto [inhibit-charge]
 ```
 
 如果文件不存在或不包含这两个值，停止安装。不要用输入限流或直接写 PMIC
@@ -100,12 +108,19 @@ shell 片段加载，因此文件必须只允许 root 修改。
 sudo mi5x-charge-control once
 ```
 
-紧急恢复充电：
+## 回退
+
+自定义内核安装为 `/boot/vmlinuz.custom`，原内核仍保留在 `/boot/vmlinuz`，
+`extlinux.conf` 同时提供 `custom` 和 `stock` 两个启动项。若需要回退：
 
 ```sh
-echo auto | sudo tee /sys/class/power_supply/qcom-smbchg-usb/charge_behaviour
 sudo rc-service mi5x-charge-control stop
+sudo rc-update del mi5x-charge-control default
+echo auto | sudo tee /sys/class/power_supply/qcom-smbchg-usb/charge_behaviour
 ```
+
+然后把 `/boot/extlinux/extlinux.conf` 中的 `default custom` 改为
+`default stock` 并重启。若自定义内核无法启动，在启动菜单中直接选择 `stock`。
 
 ## 构建与测试
 
@@ -116,8 +131,8 @@ make lint
 make test
 ```
 
-测试覆盖 ABI 检测、上下限转换、中间区间状态保持、幂等写入、无效配置和服务
-收到 `SIGTERM` 后的干净退出。
+测试覆盖 ABI 检测、真实 sysfs 选中值格式、上下限转换、中间区间状态保持、
+幂等写入、无效配置和服务收到 `SIGTERM` 后的干净退出。
 
 从上游源码应用补丁并编译驱动对象需要 `git`、Clang/LLVM、Bison、Flex、bc、
 OpenSSL 和 libelf 开发包：
@@ -130,18 +145,13 @@ OpenSSL 和 libelf 开发包：
 脚本在临时目录克隆指定标签，先执行 `git apply --check`，再用 arm64
 `defconfig` 打开驱动并编译 `qcom-smbchg.o`。它不会构建或安装完整内核。
 
-## 真机验证清单
+## 真机验证状态
 
-在刷入自定义内核后至少完成以下检查；未完成前不要把项目描述为真机已验证：
-
-1. 启动后确认 `charge_behaviour` 显示 `[auto] inhibit-charge`。
-2. 电量高于上限时启动服务，确认属性变为 `inhibit-charge`，USB 仍保持供电，
-   电量不继续上升。
-3. 电量低于下限时确认属性回到 `auto` 并恢复充电。
-4. 覆盖中间电量、服务重启和手机重启，确认策略按预期恢复。
-5. 拔插 USB、WiFi 休眠和 `s2idle` 场景下观察一次完整充放电周期。
-6. 检查 `dmesg` 无 power-supply、PMIC 或充电相关错误，电池温度正常。
-7. 用命令恢复 `auto`，确认不依赖服务也能正常充电。
+2026-10-26 已在 Mi 5X / Mi A1 (`tissot`) 上验证自定义内核启动、标准 ABI、
+USB 供电保留、服务阈值转换、OpenRC 自动启动和服务重启/手机重启后的状态恢复。
+完整充电周期、真实低于 60% 的恢复、拔插 USB 以及 WiFi 休眠/`s2idle` 尚未覆盖。
+具体命令、哈希、观测值和限制见
+[真机验证记录](docs/hardware-validation-2026-10-26.md)。
 
 ## 安全边界
 
