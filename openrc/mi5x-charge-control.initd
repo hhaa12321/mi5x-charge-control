@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+
+name="Mi 5X charge control"
+description="Apply battery charge thresholds through charge_behaviour"
+
+command="/usr/sbin/mi5x-charge-control"
+command_args="daemon"
+command_user="root:root"
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
+respawn_period=60
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/dev/null"
+error_log="/dev/null"
+
+depend()
+{
+	need localmount
+	after udev-settle
+}
+
+start_pre()
+{
+	"$command" check
+}

@@ -1,0 +1,213 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -eu
+
+PROGRAM=${0##*/}
+CONFIG_FILE=${MCC_CONFIG_FILE:-/etc/conf.d/mi5x-charge-control}
+
+usage()
+{
+	cat <<EOF
+Usage: $PROGRAM [--config FILE] [check|once|daemon]
+
+  check   validate the configuration and kernel charge_behaviour ABI
+  once    apply at most one threshold transition
+  daemon  monitor continuously and apply threshold transitions
+EOF
+}
+
+log()
+{
+	message=$*
+
+	printf '%s: %s\n' "$PROGRAM" "$message" >&2
+	if [ "${MCC_USE_SYSLOG:-0}" = 1 ] && command -v logger >/dev/null 2>&1; then
+		logger -t "$PROGRAM" "$message" 2>/dev/null || :
+	fi
+}
+
+die()
+{
+	log "error: $*"
+	exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--config)
+		[ "$#" -ge 2 ] || die "--config requires a file"
+		CONFIG_FILE=$2
+		shift 2
+		;;
+	--help|-h)
+		usage
+		exit 0
+		;;
+	check|once|daemon)
+		MODE=$1
+		shift
+		[ "$#" -eq 0 ] || die "unexpected argument: $1"
+		;;
+	*)
+		die "unknown argument: $1"
+		;;
+	esac
+done
+
+MODE=${MODE:-daemon}
+[ -r "$CONFIG_FILE" ] || die "cannot read configuration: $CONFIG_FILE"
+# shellcheck source=/dev/null
+. "$CONFIG_FILE"
+
+MCC_UPPER=${MCC_UPPER:-75}
+MCC_LOWER=${MCC_LOWER:-60}
+MCC_INTERVAL=${MCC_INTERVAL:-30}
+MCC_BATTERY_PATH=${MCC_BATTERY_PATH:-/sys/class/power_supply/qcom-battery}
+MCC_CHARGER_PATH=${MCC_CHARGER_PATH:-/sys/class/power_supply/qcom-smbchg-usb}
+MCC_USE_SYSLOG=${MCC_USE_SYSLOG:-1}
+
+CAPACITY_FILE=$MCC_BATTERY_PATH/capacity
+BEHAVIOUR_FILE=$MCC_CHARGER_PATH/charge_behaviour
+
+require_integer()
+{
+	name=$1
+	value=$2
+
+	case "$value" in
+	''|*[!0-9]*)
+		die "$name must be an integer, got: $value"
+		;;
+	esac
+}
+
+check_config()
+{
+	require_integer MCC_UPPER "$MCC_UPPER"
+	require_integer MCC_LOWER "$MCC_LOWER"
+	require_integer MCC_INTERVAL "$MCC_INTERVAL"
+
+	[ "$MCC_UPPER" -le 100 ] || die "MCC_UPPER must be at most 100"
+	[ "$MCC_LOWER" -ge 0 ] || die "MCC_LOWER must be at least 0"
+	[ "$MCC_UPPER" -gt "$MCC_LOWER" ] ||
+		die "MCC_UPPER must be greater than MCC_LOWER"
+	[ "$MCC_INTERVAL" -ge 5 ] ||
+		die "MCC_INTERVAL must be at least 5 seconds"
+	[ "$MCC_INTERVAL" -le 3600 ] ||
+		die "MCC_INTERVAL must be at most 3600 seconds"
+}
+
+current_behaviour()
+{
+	raw=$(tr -d '[:space:]' <"$BEHAVIOUR_FILE") ||
+		die "cannot read charge behaviour"
+
+	case "$raw" in
+	\[auto\]*) printf '%s\n' auto ;;
+	\[inhibit-charge\]*) printf '%s\n' inhibit-charge ;;
+	auto) printf '%s\n' auto ;;
+	inhibit-charge) printf '%s\n' inhibit-charge ;;
+	*) die "cannot parse charge behaviour: $raw" ;;
+	esac
+}
+
+check_runtime()
+{
+	[ -r "$CAPACITY_FILE" ] || die "cannot read battery capacity: $CAPACITY_FILE"
+	[ -r "$BEHAVIOUR_FILE" ] ||
+		die "missing charge_behaviour ABI: $BEHAVIOUR_FILE"
+	[ -w "$BEHAVIOUR_FILE" ] ||
+		die "charge behaviour is not writable (run as root): $BEHAVIOUR_FILE"
+
+	available=$(tr -d '[:space:]' <"$BEHAVIOUR_FILE") ||
+		die "cannot read charge behaviours"
+	case "$available" in
+	*auto*) ;;
+	*) die "kernel must support auto and inhibit-charge" ;;
+	esac
+	case "$available" in
+	*inhibit-charge*) ;;
+	*) die "kernel must support auto and inhibit-charge" ;;
+	esac
+
+	current_behaviour >/dev/null
+}
+
+read_capacity()
+{
+	capacity=$(tr -d '[:space:]' <"$CAPACITY_FILE") ||
+		die "cannot read battery capacity"
+	require_integer capacity "$capacity"
+	[ "$capacity" -le 100 ] || die "invalid battery capacity: $capacity"
+	printf '%s\n' "$capacity"
+}
+
+write_behaviour()
+{
+	target=$1
+
+	printf '%s\n' "$target" >"$BEHAVIOUR_FILE" ||
+		die "failed to set charge behaviour to $target"
+	[ "$(current_behaviour)" = "$target" ] ||
+		die "kernel did not accept charge behaviour $target"
+}
+
+run_once()
+{
+	check_config
+	check_runtime
+
+	capacity=$(read_capacity)
+	current=$(current_behaviour)
+
+	if [ "$capacity" -ge "$MCC_UPPER" ]; then
+		target=inhibit-charge
+	elif [ "$capacity" -le "$MCC_LOWER" ]; then
+		target=auto
+	else
+		return 0
+	fi
+
+	[ "$current" = "$target" ] && return 0
+
+	write_behaviour "$target"
+	log "battery ${capacity}%: charge behaviour $current -> $target"
+}
+
+run_daemon()
+{
+	stopping=0
+	sleep_pid=
+	stop_daemon()
+	{
+		stopping=1
+		[ -z "$sleep_pid" ] || kill "$sleep_pid" 2>/dev/null || :
+	}
+	trap stop_daemon HUP INT TERM
+
+	while [ "$stopping" -eq 0 ]; do
+		run_once
+		[ "$stopping" -eq 0 ] || break
+
+		sleep "$MCC_INTERVAL" &
+		sleep_pid=$!
+		wait "$sleep_pid" || :
+		sleep_pid=
+	done
+}
+
+case "$MODE" in
+check)
+	check_config
+	check_runtime
+	printf '%s: kernel ABI ready, battery %s%%, behaviour %s\n' \
+		"$PROGRAM" "$(read_capacity)" "$(current_behaviour)"
+	;;
+once)
+	run_once
+	;;
+daemon)
+	run_daemon
+	;;
+esac

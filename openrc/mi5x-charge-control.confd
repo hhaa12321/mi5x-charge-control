@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Stop charging at or above this percentage.
+MCC_UPPER=75
+
+# Resume charging at or below this percentage.
+MCC_LOWER=60
+
+# Seconds between battery-capacity samples.
+MCC_INTERVAL=30
+
+MCC_BATTERY_PATH=/sys/class/power_supply/qcom-battery
+MCC_CHARGER_PATH=/sys/class/power_supply/qcom-smbchg-usb
+
+# Also send state transitions and errors to syslog.
+MCC_USE_SYSLOG=1

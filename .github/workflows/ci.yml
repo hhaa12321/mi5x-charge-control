@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint
+        run: make lint
+      - name: Test charge controller
+        run: make test
+
+  kernel:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag:
+          - v7.0.9-r0
+          - v7.1.3-r0
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison bc flex libelf-dev libssl-dev clang lld llvm
+      - name: Apply patch and compile qcom-smbchg.o
+        env:
+          JOBS: 4
+        run: ./scripts/test-kernel-patch.sh "${{ matrix.tag }}"

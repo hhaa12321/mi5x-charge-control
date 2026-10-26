@@ -1,0 +1,80 @@
+diff --git a/drivers/power/supply/qcom-smbchg.c b/drivers/power/supply/qcom-smbchg.c
+index 8ab06f2..a65eb27 100644
+--- a/drivers/power/supply/qcom-smbchg.c
++++ b/drivers/power/supply/qcom-smbchg.c
+@@ -1325,6 +1325,9 @@ static int smbchg_get_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_ONLINE:
+ 		val->intval = smbchg_usb_is_present(chip);
+ 		break;
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
++		val->intval = chip->charge_behaviour;
++		break;
+ 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+ 		ret = smbchg_charging_get_ilim(chip);
+ 		if (ret < 0)
+@@ -1379,6 +1382,20 @@ static int smbchg_set_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_ONLINE:
+ 		ret = smbchg_usb_enable(chip, val->intval);
+ 		break;
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
++		switch (val->intval) {
++		case POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO:
++			ret = smbchg_charging_enable(chip, true);
++			break;
++		case POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE:
++			ret = smbchg_charging_enable(chip, false);
++			break;
++		default:
++			return -EINVAL;
++		}
++		if (!ret)
++			chip->charge_behaviour = val->intval;
++		break;
+ 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+ 		/*
+ 		 * Prevent exceeding the maximum constant charge current
+@@ -1408,6 +1425,7 @@ static int smbchg_property_is_writeable(struct power_supply *psy,
+ {
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_ONLINE:
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
+ 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+ 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+ 		return true;
+@@ -1424,6 +1442,7 @@ static enum power_supply_property smbchg_props[] = {
+ 	POWER_SUPPLY_PROP_HEALTH,
+ 	POWER_SUPPLY_PROP_PRESENT,
+ 	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR,
+ 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+ 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
+ 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+@@ -1434,6 +1453,8 @@ static enum power_supply_property smbchg_props[] = {
+ static const struct power_supply_desc smbchg_usb_psy_desc = {
+ 	.name = "qcom-smbchg-usb",
+ 	.type = POWER_SUPPLY_TYPE_USB,
++	.charge_behaviours = BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO) |
++			     BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE),
+ 	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
+ 		     BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+ 		     BIT(POWER_SUPPLY_USB_TYPE_DCP) |
+@@ -1586,6 +1607,7 @@ static int smbchg_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 
+ 	chip->dev = &pdev->dev;
++	chip->charge_behaviour = POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO;
+ 
+ 	chip->regmap = dev_get_regmap(chip->dev->parent, NULL);
+ 	if (!chip->regmap) {
+diff --git a/drivers/power/supply/qcom-smbchg.h b/drivers/power/supply/qcom-smbchg.h
+index 4f3b1a9..17f476c 100644
+--- a/drivers/power/supply/qcom-smbchg.h
++++ b/drivers/power/supply/qcom-smbchg.h
+@@ -253,6 +253,7 @@ struct smbchg_chip {
+ 	struct usb_role_switch *role_sw;
+ 	enum usb_role last_role;
+ 	u16 role_sw_timeout;
++	enum power_supply_charge_behaviour charge_behaviour;
+ 	/* prevent races with reset work */
+ 	struct mutex otg_lock;
+ 
