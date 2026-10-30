@@ -2,6 +2,8 @@ SCRIPT := openrc/mi5x-charge-control
 INITD := openrc/mi5x-charge-control.initd
 CONFD := openrc/mi5x-charge-control.confd
 KERNEL_TEST := scripts/test-kernel-patch.sh
+BOOT_ENTRY_INSTALLER := scripts/install-kernel-boot-entry.sh
+BOOT_ENTRY_TEST := tests/test-install-kernel-boot-entry.sh
 
 DESTDIR ?=
 SBINDIR ?= /usr/sbin
@@ -14,14 +16,18 @@ all: lint test
 
 test:
 	sh tests/test-charge-control.sh
+	sh $(BOOT_ENTRY_TEST)
 
 lint:
 	sh -n $(SCRIPT)
 	sh -n $(INITD)
 	sh -n tests/test-charge-control.sh
+	sh -n $(BOOT_ENTRY_INSTALLER)
+	sh -n $(BOOT_ENTRY_TEST)
 	sh -n $(KERNEL_TEST)
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck $(SCRIPT) tests/test-charge-control.sh $(KERNEL_TEST); \
+		shellcheck $(SCRIPT) $(BOOT_ENTRY_INSTALLER) tests/test-charge-control.sh \
+			$(BOOT_ENTRY_TEST) $(KERNEL_TEST); \
 	fi
 
 kernel-test:

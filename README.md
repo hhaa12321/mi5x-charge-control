@@ -16,6 +16,10 @@
 > 但其他内核版本和设备仍需自行验证。刷写前必须保留可恢复启动链和原内核。
 > 实测记录见 [真机验证](docs/hardware-validation-2026-10-26.md)。
 
+postmarketOS 更新内核时会重新生成 `extlinux.conf`。仓库提供的安装脚本会把
+补丁内核设为固定默认项、保留 stock 回退项，并关闭该自动生成，避免更新后悄悄
+回到没有 `charge_behaviour` 的原版内核。
+
 ## 为什么需要内核补丁
 
 当前 Mi 5X 的 `qcom,pmi8950-smbchg` 驱动没有暴露
@@ -49,7 +53,16 @@
 
 ## 安装服务
 
-先确认自定义内核已经提供目标属性，并且两种行为都可写：
+先安装并验证补丁内核启动项。下面使用当前已验证镜像的 SHA-256；重新构建内核后
+必须改为新构建记录中的哈希：
+
+```sh
+sudo ./scripts/install-kernel-boot-entry.sh \
+  16cf2edc0978bce8962a0cd2cc9d24391b740023512d282847a84e94d31c430e
+sudo reboot
+```
+
+重启后确认自定义内核已经提供目标属性，并且两种行为都可写：
 
 ```sh
 cat /sys/class/power_supply/qcom-smbchg-usb/charge_behaviour
@@ -111,7 +124,9 @@ sudo mi5x-charge-control once
 ## 回退
 
 自定义内核安装为 `/boot/vmlinuz.custom`，原内核仍保留在 `/boot/vmlinuz`，
-`extlinux.conf` 同时提供 `custom` 和 `stock` 两个启动项。若需要回退：
+`extlinux.conf` 同时提供 `custom` 和 `stock` 两个启动项。安装脚本在
+`/etc/deviceinfo` 写入 `deviceinfo_generate_extlinux_config="false"`，防止
+postmarketOS 的 `boot-deploy` 再次把默认内核改成 stock。若需要回退：
 
 ```sh
 sudo rc-service mi5x-charge-control stop
@@ -121,6 +136,7 @@ echo auto | sudo tee /sys/class/power_supply/qcom-smbchg-usb/charge_behaviour
 
 然后把 `/boot/extlinux/extlinux.conf` 中的 `default custom` 改为
 `default stock` 并重启。若自定义内核无法启动，在启动菜单中直接选择 `stock`。
+待机菜单保留 5 秒。
 
 ## 构建与测试
 
@@ -132,7 +148,8 @@ make test
 ```
 
 测试覆盖 ABI 检测、真实 sysfs 选中值格式、上下限转换、中间区间状态保持、
-幂等写入、无效配置和服务收到 `SIGTERM` 后的干净退出。
+幂等写入、无效配置、服务收到 `SIGTERM` 后的干净退出，以及补丁内核启动项的
+哈希校验、stock 回退项和重复安装。
 
 从上游源码应用补丁并编译驱动对象需要 `git`、Clang/LLVM、Bison、Flex、bc、
 OpenSSL 和 libelf 开发包：
